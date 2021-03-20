@@ -1644,13 +1644,13 @@ This set of allowed chars is enough for hexifying local file paths.")
   (descriptors (make-hash-table :test 'equal))
   root-directory)
 
-(defun lsp--folder-watch-callback (event callback watch)
+(defun lsp--folder-watch-callback (event callback watch captured-lsp-file-watch-ignored-directories captured-lsp-file-watch-ignored-files)
   (let ((file-name (cl-third event))
         (event-type (cl-second event)))
     (cond
      ((and (file-directory-p file-name)
            (equal 'created event-type)
-           (not (lsp--string-match-any (lsp-file-watch-ignored-directories) file-name)))
+           (not (lsp--string-match-any captured-lsp-file-watch-ignored-directories file-name)))
 
       (lsp-watch-root-folder (file-truename file-name) callback watch)
 
@@ -1661,7 +1661,7 @@ This set of allowed chars is enough for hexifying local file paths.")
                      (unless (file-directory-p f)
                        (funcall callback (list nil 'created f)))))))
      ((and (not (file-directory-p file-name))
-           (not (lsp--string-match-any lsp-file-watch-ignored-files file-name))
+           (not (lsp--string-match-any captured-lsp-file-watch-ignored-files file-name))
            (memq event-type '(created deleted changed)))
       (funcall callback event)))))
 
@@ -1718,6 +1718,13 @@ already have been created."
   (let* ((dir (if (f-symlink? dir)
                   (file-truename dir)
                 dir))
+         ;; If lsp-file-watch-ignored-directores or lsp-file-watch-ignored-files
+         ;; are buffer local, then we want to capture their value here
+         ;; and ensure that lsp--folder-watch-callback is given their current
+         ;; buffer-local values, rather than using whatever value is present
+         ;; for whatever buffer happens to be open when the callback is invoked.
+         (captured-lsp-file-watch-ignored-directories (lsp-file-watch-ignored-directories))
+         (captured-lsp-file-watch-ignored-files lsp-file-watch-ignored-files)
          (watch (or watch (make-lsp-watch :root-directory dir))))
     (lsp-log "Creating watch for %s" dir)
     (when (or
@@ -1736,7 +1743,9 @@ already have been created."
              (file-notify-add-watch dir
                                     '(change)
                                     (lambda (event)
-                                      (lsp--folder-watch-callback event callback watch)))
+                                      (lsp--folder-watch-callback event callback watch
+                                                                  captured-lsp-file-watch-ignored-directories
+                                                                  captured-lsp-file-watch-ignored-files)))
              (lsp-watch-descriptors watch))
             (seq-do
              (-rpartial #'lsp-watch-root-folder callback watch)
